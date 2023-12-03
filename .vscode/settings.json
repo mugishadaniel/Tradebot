@@ -2,5 +2,6 @@
 	"files.associations": {
 		"*.mq5": "cpp"
 	},
-	"C_Cpp.default.compilerPath": ""
+	"C_Cpp.default.compilerPath": "",
+	"C_Cpp.errorSquiggles": "disabled"
 }
