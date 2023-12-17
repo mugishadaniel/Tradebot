@@ -11,26 +11,31 @@
 input int H1_Period = 60; // H1 period (in minutes)
 
 // Define global variables
-double lowestLow;  // Laagste laag in een opwaartse trend
+double lowestLow;	// Laagste laag in een opwaartse trend
 double highestHigh; // Hoogste hoog in een neerwaartse trend
 datetime lastCalculationTime = 0;
-int recalibrationInterval = 3600;  // 1 hour in seconds
+int recalibrationInterval = 3600; // 1 hour in seconds
+int TicksReceivedCount = 0;
+
+bool isUptrend = false;				 // Flag to track if the current trend is upward
+bool isDowntrend = false;			 // Flag to track if the current trend is downward
+double retracementThreshold = 0.001; // Define your retracement threshold
+bool retracementTested = false;		 // Flag to track if retracement has been tested
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Calculate the initial lowest low and highest high based on historical data
-   lowestLow = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
-   highestHigh = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
+	// Calculate the initial lowest low and highest high based on historical data
+	lowestLow = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
+	highestHigh = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
 
 	DrawTrendLines();
 
 	EventSetMillisecondTimer(recalibrationInterval * 1000);
 
-   
-   return(INIT_SUCCEEDED);
+	return (INIT_SUCCEEDED);
 }
 
 void DrawTrendLines()
@@ -56,15 +61,15 @@ void DrawTrendLines()
 
 void OnTimer()
 {
-    // Recalculate the highest high and lowest low
-   	int indexLowest = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
-   	int indexHighest = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
+	// Recalculate the highest high and lowest low
+	int indexLowest = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
+	int indexHighest = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
 
-	   lowestLow = iLow(_Symbol, PERIOD_H1, indexLowest);
-  	   highestHigh = iHigh(_Symbol, PERIOD_H1, indexHighest);
+	lowestLow = iLow(_Symbol, PERIOD_H1, indexLowest);
+	highestHigh = iHigh(_Symbol, PERIOD_H1, indexHighest);
 
-   // Update the last calculation time
-   lastCalculationTime = TimeCurrent();
+	// Update the last calculation time
+	lastCalculationTime = TimeCurrent();
 }
 
 //+------------------------------------------------------------------+
@@ -72,52 +77,80 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // Bepaal of de markt de trendlijn doorbreekt
-   
-   	//check of het tijd is om te herberekenen
+	TicksReceivedCount++;
+	// Bepaal of de markt de trendlijn doorbreekt
+
+	// Update the trend direction flags based on current price
+	double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Assuming a buy strategy
+	isUptrend = currentPrice > highestHigh;
+	isDowntrend = currentPrice < lowestLow;
+
+	// check of het tijd is om te herberekenen
 	if (TimeCurrent() - lastCalculationTime >= recalibrationInterval)
-   	{
-     	// Recalculate the highest high and lowest low
-   		int indexLowest = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
-   		int indexHighest = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
+	{
+		// Recalculate the highest high and lowest low
+		int indexLowest = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
+		int indexHighest = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
 
-	   lowestLow = iLow(_Symbol, PERIOD_H1, indexLowest);
-  	   highestHigh = iHigh(_Symbol, PERIOD_H1, indexHighest);
+		lowestLow = iLow(_Symbol, PERIOD_H1, indexLowest);
+		highestHigh = iHigh(_Symbol, PERIOD_H1, indexHighest);
 
-      	// Update the last calculation time
-      	lastCalculationTime = TimeCurrent();
+		// Update the last calculation time
+		lastCalculationTime = TimeCurrent();
 
-	  // Update the trendlines
-      ObjectSetInteger(0, "Trendline_Up", OBJPROP_TIME, iTime(_Symbol, PERIOD_H1, lowestLow));
-      ObjectSetDouble(0, "Trendline_Up", OBJPROP_PRICE, NormalizeDouble(lowestLow, Digits()));
+		// Update the trendlines
+		ObjectSetInteger(0, "Trendline_Up", OBJPROP_TIME, iTime(_Symbol, PERIOD_H1, lowestLow));
+		ObjectSetDouble(0, "Trendline_Up", OBJPROP_PRICE, NormalizeDouble(lowestLow, Digits()));
 
-      ObjectSetInteger(0, "Trendline_Down", OBJPROP_TIME, iTime(_Symbol, PERIOD_H1, highestHigh));
-      ObjectSetDouble(0, "Trendline_Down", OBJPROP_PRICE, NormalizeDouble(highestHigh, Digits()));
-   	}
-   // Huidige hoogte (hoogste punt) in een opwaartse trend
-   double currentHigh = iHigh(_Symbol, PERIOD_CURRENT, 0);
-   
-   // Huidige laagte (laagste punt) in een neerwaartse trend
-   double currentLow = iLow(_Symbol, PERIOD_CURRENT, 0);
+		ObjectSetInteger(0, "Trendline_Down", OBJPROP_TIME, iTime(_Symbol, PERIOD_H1, highestHigh));
+		ObjectSetDouble(0, "Trendline_Down", OBJPROP_PRICE, NormalizeDouble(highestHigh, Digits()));
+	}
 
+	// Check for retracement in an upward trend
+	if (isUptrend && !retracementTested)
+	{
+		if (currentPrice <= highestHigh && currentPrice >= highestHigh - retracementThreshold)
+		{
+			retracementTested = true;
+			Print("Retracement towards the high in an upward trend detected");
+			// Implement your logic for handling the retracement
+		}
+	}
 
-   Print("currentHigh: ", currentHigh);
-   Print("highestHigh: ", highestHigh);
-   Print("currentLow: ", currentLow);
-   Print("lowestLow: ", lowestLow);
+	// Check for retracement in a downward trend
+	if (isDowntrend && !retracementTested)
+	{
+		if (currentPrice >= lowestLow && currentPrice <= lowestLow + retracementThreshold)
+		{
+			retracementTested = true;
+			Print("Retracement towards the low in a downward trend detected");
+			// Implement your logic for handling the retracement
+		}
+	}
 
-   // Controleer of de markt de trendlijn doorbreekt in een opwaartse trend
-   if(currentHigh > highestHigh)
-   {
-      Print("Markt doorbreekt trendlijn in een opwaartse trend");
-      // Voer hier je handelslogica uit
-   }
-   
-   // Controleer of de markt de trendlijn doorbreekt in een neerwaartse trend
-   if(currentLow < lowestLow)
-   {
-      Print("Markt doorbreekt trendlijn in een neerwaartse trend");
-      // Voer hier je handelslogica uit
-   }
+	// Huidige hoogte (hoogste punt) in een opwaartse trend
+	double currentHigh = iHigh(_Symbol, PERIOD_CURRENT, 0);
+
+	// Huidige laagte (laagste punt) in een neerwaartse trend
+	double currentLow = iLow(_Symbol, PERIOD_CURRENT, 0);
+
+	Print("currentHigh: ", currentHigh);
+	Print("highestHigh: ", highestHigh);
+	Print("currentLow: ", currentLow);
+	Print("lowestLow: ", lowestLow + " ////");
+
+	// Controleer of de markt de trendlijn doorbreekt in een opwaartse trend
+	if (currentHigh > highestHigh)
+	{
+		Print("Markt doorbreekt trendlijn in een opwaartse trend");
+		// Voer hier je handelslogica uit
+	}
+
+	// Controleer of de markt de trendlijn doorbreekt in een neerwaartse trend
+	if (currentLow < lowestLow)
+	{
+		Print("Markt doorbreekt trendlijn in een neerwaartse trend");
+		// Voer hier je handelslogica uit
+	}
+	Comment("Ticks received: " + TicksReceivedCount);
 }
-
