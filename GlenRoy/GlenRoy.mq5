@@ -22,6 +22,16 @@ bool isDowntrend = false;			 // Flag to track if the current trend is downward
 double retracementThreshold = 0.001; // Define your retracement threshold
 bool retracementTested = false;		 // Flag to track if retracement has been tested
 
+// Global variables for M5 timeframe
+double M5_lowestLow;
+double M5_highestHigh;
+
+bool isWPattern = false;
+bool isMPattern = false;
+
+double stopLoss = 0.0;
+double takeProfit = 0.0;
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -72,6 +82,82 @@ void OnTimer()
 	lastCalculationTime = TimeCurrent();
 }
 
+bool DetectWPattern()
+{
+	// Define the number of candles to check
+	int lookbackCandles = 10; // Adjust as needed
+
+	// Variables to store the first and second lows
+	double firstLow = DBL_MAX;	// Initialize to a very high value
+	double secondLow = DBL_MAX; // Initialize to a very high value
+	datetime firstLowTime = 0;
+	datetime secondLowTime = 0;
+
+	for (int i = 0; i < lookbackCandles; i++)
+	{
+		double currentLow = iLow(_Symbol, PERIOD_M5, i);
+		if (currentLow < firstLow)
+		{
+			secondLow = firstLow;
+			secondLowTime = firstLowTime;
+
+			firstLow = currentLow;
+			firstLowTime = iTime(_Symbol, PERIOD_M5, i);
+		}
+		else if (currentLow < secondLow && iTime(_Symbol, PERIOD_M5, i) > firstLowTime)
+		{
+			secondLow = currentLow;
+			secondLowTime = iTime(_Symbol, PERIOD_M5, i);
+		}
+	}
+
+	// Check if the second low is higher than the first low
+	if (firstLow < secondLow && firstLowTime < secondLowTime)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+bool DetectMPattern()
+{
+	// Define the number of candles to check
+	int lookbackCandles = 10; // Adjust as needed
+
+	// Variables to store the first and second highs
+	double firstHigh = -DBL_MAX;  // Initialize to a very low value
+	double secondHigh = -DBL_MAX; // Initialize to a very low value
+	datetime firstHighTime = 0;
+	datetime secondHighTime = 0;
+
+	for (int i = 0; i < lookbackCandles; i++)
+	{
+		double currentHigh = iHigh(_Symbol, PERIOD_M5, i);
+		if (currentHigh > firstHigh)
+		{
+			secondHigh = firstHigh;
+			secondHighTime = firstHighTime;
+
+			firstHigh = currentHigh;
+			firstHighTime = iTime(_Symbol, PERIOD_M5, i);
+		}
+		else if (currentHigh > secondHigh && iTime(_Symbol, PERIOD_M5, i) > firstHighTime)
+		{
+			secondHigh = currentHigh;
+			secondHighTime = iTime(_Symbol, PERIOD_M5, i);
+		}
+	}
+
+	// Check if the second high is lower than the first high
+	if (firstHigh > secondHigh && firstHighTime < secondHighTime)
+	{
+		return true;
+	}
+
+	return false;
+}
+
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
@@ -106,24 +192,32 @@ void OnTick()
 		ObjectSetDouble(0, "Trendline_Down", OBJPROP_PRICE, NormalizeDouble(highestHigh, Digits()));
 	}
 
-	// Check for retracement in an upward trend
-	if (isUptrend && !retracementTested)
+	static datetime lastM5UpdateTime = 0;
+	if (TimeCurrent() - lastM5UpdateTime > 300) // Update every 5 minutes
 	{
-		if (currentPrice <= highestHigh && currentPrice >= highestHigh - retracementThreshold)
+		M5_lowestLow = iLowest(_Symbol, PERIOD_M5, MODE_LOW, H1_Period, 0);
+		M5_highestHigh = iHighest(_Symbol, PERIOD_M5, MODE_HIGH, H1_Period, 0);
+		lastM5UpdateTime = TimeCurrent();
+	}
+
+	// Check for retracement on M5 timeframe
+	if (isUptrend && currentPrice < M5_highestHigh && currentPrice > M5_lowestLow)
+	{
+		// Logic for retracement in an uptrend on M5 timeframe
+		if (!retracementTested && currentPrice >= highestHigh - retracementThreshold)
 		{
 			retracementTested = true;
-			Print("Retracement towards the high in an upward trend detected");
+			Print("Retracement towards the high in an uptrend on M5 detected");
 			// Implement your logic for handling the retracement
 		}
 	}
-
-	// Check for retracement in a downward trend
-	if (isDowntrend && !retracementTested)
+	else if (isDowntrend && currentPrice > M5_lowestLow && currentPrice < M5_highestHigh)
 	{
-		if (currentPrice >= lowestLow && currentPrice <= lowestLow + retracementThreshold)
+		// Logic for retracement in a downtrend on M5 timeframe
+		if (!retracementTested && currentPrice <= lowestLow + retracementThreshold)
 		{
 			retracementTested = true;
-			Print("Retracement towards the low in a downward trend detected");
+			Print("Retracement towards the low in a downtrend on M5 detected");
 			// Implement your logic for handling the retracement
 		}
 	}
@@ -152,5 +246,40 @@ void OnTick()
 		Print("Markt doorbreekt trendlijn in een neerwaartse trend");
 		// Voer hier je handelslogica uit
 	}
+
+	// Logic to detect 'W' pattern in an uptrend
+	if (isUptrend && retracementTested)
+	{
+		// Implement your logic for detecting a 'W' pattern
+		isWPattern = DetectWPattern();
+	}
+
+	// Logic to detect 'M' pattern in a downtrend
+	if (isDowntrend && retracementTested)
+	{
+		// Implement your logic for detecting an 'M' pattern
+		isMPattern = DetectMPattern();
+	}
+
+	// Set Take Profit and Stop Loss for an Uptrend
+	if (isUptrend && isWPattern)
+	{
+		takeProfit = highestHigh;
+		stopLoss = M5_lowestLow; // Assuming this is the lowest point of the 'W' pattern
+
+		// Implement your order execution logic here
+		// Example: OrderSend(_Symbol, OP_BUY, lotSize, currentPrice, 3, stopLoss, takeProfit, "Buy Order", magicNumber, 0, clrGreen);
+	}
+
+	// Set Take Profit and Stop Loss for a Downtrend
+	if (isDowntrend && isMPattern)
+	{
+		takeProfit = lowestLow;
+		stopLoss = M5_highestHigh; // Assuming this is the highest point of the 'M' pattern
+
+		// Implement your order execution logic here
+		// Example: OrderSend(_Symbol, OP_SELL, lotSize, currentPrice, 3, stopLoss, takeProfit, "Sell Order", magicNumber, 0, clrRed);
+	}
+
 	Comment("Ticks received: " + TicksReceivedCount);
 }
