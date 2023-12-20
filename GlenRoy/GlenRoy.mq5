@@ -7,46 +7,108 @@
 #property link "https://www.mql5.com"
 #property version "1.00"
 
+// Include Functions
+#include <Trade\Trade.mqh> //Include MQL trade object functions.
+CTrade *Trade;			   // Declaire Trade as pointer to CTrade class
+
 // Define the input parameters
 input int H1_Period = 60; // H1 period (in minuten)
 
+// Risk Management
+input bool RiskCompounding = false;	 // Set to true for compounding risk
+input double StartingEquity = 10000; // Starting equity for fixed risk
+input double MaxLossPrc = 0.01;		 // Max loss as a percentage of equity (1% in this case)
+double CurrentEquityRisk = 0.0;		 // Equity that will be risked per trade
+double CurrentEquity = 0.0;			 // Current Equity
+
 // Globale Variabelen
-double lowestLow;	// Laagste laag in een opwaartse trend
-double highestHigh; // Hoogste hoog in een neerwaartse trend
+double lowestLow;					// Laagste laag in een opwaartse trend
+double highestHigh;					// Hoogste hoog in een neerwaartse trend
+input int InpMagicNumber = 2000001; // Magic Number voor de orders
 
 datetime lastCalculationTime = 0;
 int recalibrationInterval = 3600; // 1 uur in seconden
 int TicksReceivedCount = 0;
 
-bool isUptrend = false;				 // Checken of de huidige trend opwaarts gaat
-bool isDowntrend = false;			 // Checken of de huidige trend neerwaarts gaat
+bool isUptrend = false;	  // Checken of de huidige trend opwaarts gaat
+bool isDowntrend = false; // Checken of de huidige trend neerwaarts gaat
 
 double retracementThreshold = 0.001; // Definieer uw retracement threshold
 bool retracementTested = false;		 // Flag to track if retracement has been tested
 
-double M5_lowestLow; // Laagste laag in een opwaartse trend in M5 Timeframe
+double M5_lowestLow;   // Laagste laag in een opwaartse trend in M5 Timeframe
 double M5_highestHigh; // Hoogste hoog in een neerwaartse trend in de M5 Timeframew
 
 bool isWPattern = false;
 bool isMPattern = false;
 
 double stopLoss = 0.0;
-double takeProfit = 0.0;  // Risk Management
+double takeProfit = 0.0; // Risk Management
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+	Trade = new CTrade();
+	Trade.SetExpertMagicNumber(InpMagicNumber);
 	// Bereken het initiële laagste laagste en hoogste hoogste punt op basis van historische gegevens
 	lowestLow = iLowest(_Symbol, PERIOD_H1, MODE_LOW, H1_Period, 0);
 	highestHigh = iHighest(_Symbol, PERIOD_H1, MODE_HIGH, H1_Period, 0);
 
 	DrawTrendLines();
 
-	EventSetMillisecondTimer(recalibrationInterval * 1000); //stelt timer voor herkalibratie
+	EventSetMillisecondTimer(recalibrationInterval * 1000); // stelt timer voor herkalibratie
 
 	return (INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//|                    Custom Function                               |
+//+------------------------------------------------------------------+
+
+// Finds the optimal lot size for the trade - Orghard Forex mod by Dillon Grech
+// https://www.youtube.com/watch?v=Zft8X3htrcc&t=724s
+double OptimalLotSize(string CurrentSymbol, double EntryPrice, double StopLoss)
+{
+	// Set symbol string and calculate point value
+	double TickSize = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_SIZE);
+	double TickValue = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_VALUE);
+	if (SymbolInfoInteger(CurrentSymbol, SYMBOL_DIGITS) <= 3)
+		TickValue = TickValue / 100;
+	double PointAmount = SymbolInfoDouble(CurrentSymbol, SYMBOL_POINT);
+	double TicksPerPoint = TickSize / PointAmount;
+	double PointValue = TickValue / TicksPerPoint;
+
+	// calculate risk based off entry and stop loss level by pips
+	double RiskPoints = MathAbs((EntryPrice - StopLoss) / TickSize);
+
+	// Set risk model - fixed or compounding
+	if (RiskCompounding == true)
+	{
+		CurrentEquityRisk = AccountInfoDouble(ACCOUNT_EQUITY);
+		CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+	}
+	else
+	{
+		CurrentEquityRisk = StartingEquity;
+		CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+	}
+
+	// calculate total risk amount in dollars
+	double RiskAmount = CurrentEquityRisk * MaxLossPrc;
+
+	// Calculate lot size
+	double RiskLots = NormalizeDouble(RiskAmount / (RiskPoints * PointValue), 2);
+
+	// Print values in Journal to check if operating correctly
+	PrintFormat("TickSize=%f,TickValue=%f,PointAmount=%f,TicksPerPoint=%f,PointValue=%f,",
+				TickSize, TickValue, PointAmount, TicksPerPoint, PointValue);
+	PrintFormat("EntryPrice=%f,StopLoss=%f,RiskPoints=%f,RiskAmount=%f,RiskLots=%f,",
+				EntryPrice, StopLoss, RiskPoints, RiskAmount, RiskLots);
+
+	// Return optimal lot size
+	return RiskLots;
 }
 
 void DrawTrendLines()
@@ -85,6 +147,7 @@ void OnTimer()
 
 bool DetectWPattern()
 {
+	Print("Detecting W Pattern...");
 	// Definieer het aantal candles dat moet worden gecontroleerd
 	int lookbackCandles = 10;
 
@@ -93,7 +156,6 @@ bool DetectWPattern()
 	double secondLow = DBL_MAX; // Initialiseer op een zeer hoge double waarde
 	datetime firstLowTime = 0;
 	datetime secondLowTime = 0;
-
 
 	// Loop door de candles en zoek naar de eerste en tweede dieptepunten
 	for (int i = 0; i < lookbackCandles; i++)
@@ -125,6 +187,7 @@ bool DetectWPattern()
 
 bool DetectMPattern()
 {
+	Print("Detecting M Pattern...");
 	// Definieer het aantal candles dat moet worden gecontroleerd
 	int lookbackCandles = 10;
 
@@ -169,7 +232,7 @@ void OnTick()
 	TicksReceivedCount++;
 
 	// Update de trend directie op basis van de huidige prijs
-	double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Huidige biedprijs 
+	double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Huidige biedprijs
 	isUptrend = currentPrice > highestHigh;
 	isDowntrend = currentPrice < lowestLow;
 
@@ -231,7 +294,7 @@ void OnTick()
 	Print("currentHigh: ", currentHigh);
 	Print("highestHigh: ", highestHigh);
 	Print("currentLow: ", currentLow);
-	Print("lowestLow: ", DoubleToString(lowestLow) + " ////");
+	Print("lowestLow: ", DoubleToString(lowestLow, 5) + " ////");
 
 	// Controleer of de markt de trendlijn doorbreekt in een opwaartse trend
 	if (currentHigh > highestHigh)
@@ -260,9 +323,28 @@ void OnTick()
 	{
 		takeProfit = highestHigh;
 		stopLoss = M5_lowestLow;
+		Print("Buy Trade!//////////////////////////////////////////////////////////////////////////////////////");
+		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
+		// MQL5 trade request structure
+		MqlTradeRequest request;	 // We maken een MqlTradeRequest object aan
+		ZeroMemory(request);		 // We zetten alle waarden op 0
+		MqlTradeResult result = {0}; // hier slaan we het resultaat van de order in op
+		// We vullen de MqlTradeRequest object met de juiste waarden
+		request.action = TRADE_ACTION_DEAL;
+		request.symbol = _Symbol;
+		request.volume = lotSize;
+		request.type = ORDER_TYPE_BUY;
+		request.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+		request.sl = stopLoss;
+		request.tp = takeProfit;
+		request.deviation = 3;
+		request.magic = InpMagicNumber;
+		request.comment = "Buy Order";
 
-		// Implement your order execution logic here
-		// Example: OrderSend(_Symbol, OP_BUY, lotSize, currentPrice, 3, stopLoss, takeProfit, "Buy Order", magicNumber, 0, clrGreen);
+		bool result_flag = OrderSend(request, result);
+
+		if (!result_flag)
+			Print("Order Send failed: ", GetLastError());
 	}
 
 	// Zet Take Profit en Stop Loss voor een neerwaartse trend
@@ -270,10 +352,34 @@ void OnTick()
 	{
 		takeProfit = lowestLow;
 		stopLoss = M5_highestHigh;
+		Print("Sell Trade!//////////////////////////////////////////////////////////////////////////////////////");
 
-		// Implement your order execution logic here
-		// Example: OrderSend(_Symbol, OP_SELL, lotSize, currentPrice, 3, stopLoss, takeProfit, "Sell Order", magicNumber, 0, clrRed);
+		// Calculate the optimal lot size
+		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
+
+		// MQL5 trade request structure
+		MqlTradeRequest request;
+		ZeroMemory(request);
+		MqlTradeResult result = {0};
+
+		request.action = TRADE_ACTION_DEAL;
+		request.symbol = _Symbol;
+		request.volume = lotSize;
+		request.type = ORDER_TYPE_SELL;						   // Order type for a sell order
+		request.price = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Use bid price for sell
+		request.sl = stopLoss;
+		request.tp = takeProfit;
+		request.deviation = 3;
+		request.magic = InpMagicNumber;
+		request.comment = "Sell Order";
+
+		// Send the order
+		bool result_flag = OrderSend(request, result);
+
+		// Check for errors
+		if (!result_flag)
+			Print("Order Send failed: ", GetLastError());
 	}
 
-	Comment("Ticks received: " + DoubleToString(TicksReceivedCount));
+	Comment("Ticks received: " + DoubleToString(TicksReceivedCount, 0));
 }
