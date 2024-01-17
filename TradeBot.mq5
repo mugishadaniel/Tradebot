@@ -8,7 +8,7 @@
 #property version "1.00"
 
 // Include Functions
-#include <Trade\Trade.mqh> //Include MQL trade object functions.
+#include <Trade/Trade.mqh> //Include MQL trade object functions.
 CTrade *Trade;			   // Declaire Trade as pointer to CTrade class
 
 // Setup Variables

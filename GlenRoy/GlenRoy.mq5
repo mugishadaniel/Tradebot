@@ -8,8 +8,8 @@
 #property version "1.00"
 
 // Include Functions
-#include <Trade\Trade.mqh> //Include MQL trade object functions.
-CTrade *Trade;			   // Declaire Trade as pointer to CTrade class
+#include <Trade/Trade.mqh> //Include de MQL trade functies zoals OrderSend() en OrderClose()
+CTrade *Trade;			   // Deklareert een trade object
 
 // Define the input parameters
 input int H1_Period = 60; // H1 period (in minuten)
@@ -71,45 +71,58 @@ int OnInit()
 // https://www.youtube.com/watch?v=Zft8X3htrcc&t=724s
 double OptimalLotSize(string CurrentSymbol, double EntryPrice, double StopLoss)
 {
-	// Set symbol string and calculate point value
-	double TickSize = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_SIZE);
-	double TickValue = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_VALUE);
-	if (SymbolInfoInteger(CurrentSymbol, SYMBOL_DIGITS) <= 3)
-		TickValue = TickValue / 100;
-	double PointAmount = SymbolInfoDouble(CurrentSymbol, SYMBOL_POINT);
-	double TicksPerPoint = TickSize / PointAmount;
-	double PointValue = TickValue / TicksPerPoint;
+    // Set symbol string and calculate point value
+    double TickSize = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_SIZE);
+    double TickValue = SymbolInfoDouble(CurrentSymbol, SYMBOL_TRADE_TICK_VALUE);
+    
+    if (SymbolInfoInteger(CurrentSymbol, SYMBOL_DIGITS) <= 3)
+        TickValue = TickValue / 100;
 
-	// calculate risk based off entry and stop loss level by pips
-	double RiskPoints = MathAbs((EntryPrice - StopLoss) / TickSize);
+    double PointAmount = SymbolInfoDouble(CurrentSymbol, SYMBOL_POINT);
+    double TicksPerPoint = TickSize / PointAmount;
+    
+    double PointValue = (TicksPerPoint != 0.0) ? TickValue / TicksPerPoint : 0.0;
 
-	// Set risk model - fixed or compounding
-	if (RiskCompounding == true)
-	{
-		CurrentEquityRisk = AccountInfoDouble(ACCOUNT_EQUITY);
-		CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-	}
-	else
-	{
-		CurrentEquityRisk = StartingEquity;
-		CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-	}
+    // Check for zero division
+    if (PointValue == 0.0)
+    {
+        Print("Error: PointValue is zero. Unable to calculate RiskLots.");
+        return 0.0;
+    }
 
-	// calculate total risk amount in dollars
-	double RiskAmount = CurrentEquityRisk * MaxLossPrc;
+    // Calculate risk based on entry and stop loss level by pips
+    double RiskPoints = MathAbs((EntryPrice - StopLoss) / TickSize);
 
-	// Calculate lot size
-	double RiskLots = NormalizeDouble(RiskAmount / (RiskPoints * PointValue), 2);
+    // Set risk model - fixed or compounding
+    if (RiskCompounding)
+    {
+        CurrentEquityRisk = AccountInfoDouble(ACCOUNT_EQUITY);
+        CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    }
+    else
+    {
+        CurrentEquityRisk = StartingEquity;
+        CurrentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+    }
 
-	// Print values in Journal to check if operating correctly
-	PrintFormat("TickSize=%f,TickValue=%f,PointAmount=%f,TicksPerPoint=%f,PointValue=%f,",
-				TickSize, TickValue, PointAmount, TicksPerPoint, PointValue);
-	PrintFormat("EntryPrice=%f,StopLoss=%f,RiskPoints=%f,RiskAmount=%f,RiskLots=%f,",
-				EntryPrice, StopLoss, RiskPoints, RiskAmount, RiskLots);
+    // Check for errors in AccountInfoDouble calls if needed
 
-	// Return optimal lot size
-	return RiskLots;
+    // Calculate total risk amount in dollars
+    double RiskAmount = CurrentEquityRisk * MaxLossPrc;
+
+    // Calculate lot size
+    double RiskLots = NormalizeDouble(RiskAmount / (RiskPoints * PointValue), 2);
+
+    // Print values in Journal for debugging
+    PrintFormat("TickSize=%f, TickValue=%f, PointAmount=%f, TicksPerPoint=%f, PointValue=%f",
+                TickSize, TickValue, PointAmount, TicksPerPoint, PointValue);
+    PrintFormat("EntryPrice=%f, StopLoss=%f, RiskPoints=%f, RiskAmount=%f, RiskLots=%f",
+                EntryPrice, StopLoss, RiskPoints, RiskAmount, RiskLots);
+
+    // Return optimal lot size
+    return RiskLots;
 }
+
 
 void DrawTrendLines()
 {
@@ -236,6 +249,12 @@ void OnTick()
 	isUptrend = currentPrice > highestHigh;
 	isDowntrend = currentPrice < lowestLow;
 
+	// Huidige hoogte (hoogste punt) in een opwaartse trend
+	double currentHigh = iHigh(_Symbol, PERIOD_CURRENT, 0);
+
+	// Huidige laagte (laagste punt) in een neerwaartse trend
+	double currentLow = iLow(_Symbol, PERIOD_CURRENT, 0);
+
 	// check of het tijd is om te herberekenen
 	if (TimeCurrent() - lastCalculationTime >= recalibrationInterval)
 	{
@@ -255,13 +274,20 @@ void OnTick()
 
 		ObjectSetInteger(0, "Trendline_Down", OBJPROP_TIME, iTime(_Symbol, PERIOD_H1, (int)highestHigh));
 		ObjectSetDouble(0, "Trendline_Down", OBJPROP_PRICE, NormalizeDouble(highestHigh, Digits()));
+
+		Print("currentHigh: ", currentHigh);
+		Print("highestHigh: ", highestHigh);
+		Print("currentLow: ", currentLow);
+		Print("lowestLow: ", DoubleToString(lowestLow, 5) + " ////");
 	}
 
 	static datetime lastM5UpdateTime = 0;
 	if (TimeCurrent() - lastM5UpdateTime > 300) // Update elke 5 minuten
 	{
-		M5_lowestLow = iLowest(_Symbol, PERIOD_M5, MODE_LOW, H1_Period, 0);
-		M5_highestHigh = iHighest(_Symbol, PERIOD_M5, MODE_HIGH, H1_Period, 0);
+		int indexM5_lowestLow = iLowest(_Symbol, PERIOD_M5, MODE_LOW, H1_Period, 0);
+		int indexM5_highestHigh = iHighest(_Symbol, PERIOD_M5, MODE_HIGH, H1_Period, 0);
+		M5_lowestLow = iLow(_Symbol, PERIOD_M5, indexM5_lowestLow);
+		M5_highestHigh = iHigh(_Symbol, PERIOD_M5, indexM5_highestHigh);
 		lastM5UpdateTime = TimeCurrent();
 	}
 
@@ -284,17 +310,6 @@ void OnTick()
 			Print("Retracement towards the low in a downtrend on M5 detected");
 		}
 	}
-
-	// Huidige hoogte (hoogste punt) in een opwaartse trend
-	double currentHigh = iHigh(_Symbol, PERIOD_CURRENT, 0);
-
-	// Huidige laagte (laagste punt) in een neerwaartse trend
-	double currentLow = iLow(_Symbol, PERIOD_CURRENT, 0);
-
-	Print("currentHigh: ", currentHigh);
-	Print("highestHigh: ", highestHigh);
-	Print("currentLow: ", currentLow);
-	Print("lowestLow: ", DoubleToString(lowestLow, 5) + " ////");
 
 	// Controleer of de markt de trendlijn doorbreekt in een opwaartse trend
 	if (currentHigh > highestHigh)
@@ -321,7 +336,7 @@ void OnTick()
 	// Zet Take Profit en Stop Loss voor een opwaartse trend
 	if (isUptrend && isWPattern)
 	{
-		takeProfit = highestHigh;
+		takeProfit = M5_highestHigh;
 		stopLoss = M5_lowestLow;
 		Print("Buy Trade!//////////////////////////////////////////////////////////////////////////////////////");
 		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
@@ -350,7 +365,7 @@ void OnTick()
 	// Zet Take Profit en Stop Loss voor een neerwaartse trend
 	if (isDowntrend && isMPattern)
 	{
-		takeProfit = lowestLow;
+		takeProfit = M5_lowestLow;
 		stopLoss = M5_highestHigh;
 		Print("Sell Trade!//////////////////////////////////////////////////////////////////////////////////////");
 
