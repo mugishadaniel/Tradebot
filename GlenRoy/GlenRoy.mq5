@@ -15,11 +15,11 @@ CTrade *Trade;			   // Deklareert een trade object
 input int H1_Period = 60; // H1 period (in minuten)
 
 // Risk Management
-input bool RiskCompounding = false;	 // Set to true for compounding risk
+input bool RiskCompounding = false;	 // Set to true for compounding risk (risk per trade is gebaseerd op de huidige equity)
 input double StartingEquity = 10000; // Starting equity for fixed risk
-input double MaxLossPrc = 0.01;		 // Max loss as a percentage of equity (1% in this case)
+input double MaxLossPrc = 0.01;		 // Max loss as a percentage of equity (de maximum percentage van verlies per trade (1% dus))
 double CurrentEquityRisk = 0.0;		 // Equity that will be risked per trade
-double CurrentEquity = 0.0;			 // Current Equity
+double CurrentEquity = 0.0;			 // Current Equity (risk compounding is false dus wordt niet gebruikt(wordt allemaal in metrader 5 gedaan))
 
 // Globale Variabelen
 double lowestLow;					// Laagste laag in een opwaartse trend
@@ -58,7 +58,7 @@ int OnInit()
 
 	DrawTrendLines();
 
-	EventSetMillisecondTimer(recalibrationInterval * 1000); // stelt timer voor herkalibratie
+	EventSetMillisecondTimer(recalibrationInterval * 1000); // stelt timer voor herkalibratie in de OnTimer() functie in
 
 	return (INIT_SUCCEEDED);
 }
@@ -255,7 +255,7 @@ void OnTick()
 	// Huidige laagte (laagste punt) in een neerwaartse trend
 	double currentLow = iLow(_Symbol, PERIOD_CURRENT, 0);
 
-	// check of het tijd is om te herberekenen
+	// check of het tijd is om te herberekenen (elke uur)
 	if (TimeCurrent() - lastCalculationTime >= recalibrationInterval)
 	{
 		// Herberekent de hoogste en laagste waarden
@@ -338,7 +338,7 @@ void OnTick()
 	{
 		takeProfit = M5_highestHigh;
 		stopLoss = M5_lowestLow;
-		Print("Buy Trade!//////////////////////////////////////////////////////////////////////////////////////");
+		Print("Buy(Long) Trade!//////////////////////////////////////////////////////////////////////////////////////");
 		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
 		// MQL5 trade request structure
 		MqlTradeRequest request;	 // We maken een MqlTradeRequest object aan
@@ -367,7 +367,7 @@ void OnTick()
 	{
 		takeProfit = M5_lowestLow;
 		stopLoss = M5_highestHigh;
-		Print("Sell Trade!//////////////////////////////////////////////////////////////////////////////////////");
+		Print("Sell(Short) Trade!//////////////////////////////////////////////////////////////////////////////////////");
 
 		// Calculate the optimal lot size
 		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
