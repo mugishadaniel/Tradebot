@@ -37,7 +37,7 @@ double retracementThreshold = 0.001; // Definieer uw retracement threshold
 bool retracementTested = false;		 // Flag to track if retracement has been tested
 
 double M5_lowestLow;   // Laagste laag in een opwaartse trend in M5 Timeframe
-double M5_highestHigh; // Hoogste hoog in een neerwaartse trend in de M5 Timeframew
+double M5_highestHigh; // Hoogste hoog in een neerwaartse trend in de M5 Timeframe
 
 bool isWPattern = false;
 bool isMPattern = false;
