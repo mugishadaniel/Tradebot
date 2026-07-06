@@ -53,32 +53,48 @@ void OnTick()
 	// Controleer alleen bij een nieuwe tick/candle en stop als er al een trade loopt
 	datetime currentTime = iTime(_Symbol, _Period, 0);
 	// Controleer of er al een positie openstaat van deze bot
+	// Blokkeer de bot als er al een actieve trade loopt óf als er een pending order klaarstaat
+	// 1. Als er een actieve positie (trade) loopt, doen we niks
 	if (HasOpenPositions())
+		return;
+
+	// 2. Als er GEEN trade loopt, maar wel een openstaande PENDING order:
+	if (OrdersTotal() > 0)
 	{
-		// Als de huidige tijd verschilt van lastMessageTime, betekent dit
-		// dat de kaars waarin we de trade openden (de 5e candle) nu volledig gesloten is.
+		// Als de tijd is versprongen, is candle 4 gesloten zonder de order te triggeren!
 		if (currentTime != lastMessageTime)
 		{
-			Print(">>> [TAKE PROFIT] 5e candle is gesloten. Sluit positie.");
-			trade.PositionClose(_Symbol); // Sluit de openstaande trade op de markt
+			Print(">>> [CANCEL] Candle 4 is voorbij en order is niet geraakt. Annuleren...");
+
+			// Loop door de orders om de pending order van deze bot te vinden en te verwijderen
+			for (int i = OrdersTotal() - 1; i >= 0; i--)
+			{
+				ulong ticket = OrderGetTicket(i);
+				if (OrderGetString(ORDER_SYMBOL) == _Symbol)
+				{
+					trade.OrderDelete(ticket);
+				}
+			}
+
+			lastMessageTime = currentTime; // Reset de tijd zodat de bot weer clean is
 		}
-		return; // Stop hier, we gaan geen nieuwe trades openen zolang er een loopt
+		return; // Stop hier, we gaan geen nieuwe orders plaatsen zolang de oude er nog staat
 	}
 
 	// Haal de data op van de laatste 4 gesloten candles
-	double c1_Open = iOpen(_Symbol, _Period, 4);
-	double c1_Close = iClose(_Symbol, _Period, 4);
+	double c1_Open = iOpen(_Symbol, _Period, 3);
+	double c1_Close = iClose(_Symbol, _Period, 3);
 
-	double c2_Open = iOpen(_Symbol, _Period, 3);
-	double c2_Close = iClose(_Symbol, _Period, 3);
+	double c2_Open = iOpen(_Symbol, _Period, 2);
+	double c2_Close = iClose(_Symbol, _Period, 2);
 
-	double c3_Open = iOpen(_Symbol, _Period, 2);
-	double c3_Close = iClose(_Symbol, _Period, 2);
+	double c3_Open = iOpen(_Symbol, _Period, 1);
+	double c3_Close = iClose(_Symbol, _Period, 1);
 
-	double c4_Open = iOpen(_Symbol, _Period, 1);
-	double c4_Close = iClose(_Symbol, _Period, 1);
-	double c4_High = iHigh(_Symbol, _Period, 1);
-	double c4_Low = iLow(_Symbol, _Period, 1);
+	double c4_Open = iOpen(_Symbol, _Period, 0);
+	double c4_Close = iClose(_Symbol, _Period, 0);
+	double c4_High = iHigh(_Symbol, _Period, 0);
+	double c4_Low = iLow(_Symbol, _Period, 0);
 
 	// // --- CHECK 1: PURE BEARISH SEQUENCE (SHORT / SELL) ---
 	// bool shortSequence = (c1_Close > c1_Open) && // C1: Groen
@@ -117,8 +133,8 @@ void OnTick()
 	// --- CHECK 2: PURE BULLISH SEQUENCE (LONG / BUY) ---
 	bool longSequence = (c1_Close < c1_Open) && // C1: Rood
 							  (c2_Close > c2_Open) && // C2: Groen
-							  (c3_Close < c3_Open) && // C3: Rood
-							  (c4_Close > c4_Open);	  // C4: Groen
+							  (c3_Close < c3_Open);	  // C3: Rood
+															  //(c4_Close > c4_Open);	  // C4: Groen
 
 	if (longSequence)
 	{
@@ -130,7 +146,7 @@ void OnTick()
 		double c4_bottom = c4_Open;
 
 		// Vorige box-eisen
-		bool bottomsValid = (c2_bottom >= ref_BodyLow && c3_bottom >= ref_BodyLow && c4_bottom >= ref_BodyLow);
+		bool bottomsValid = (c2_bottom >= ref_BodyLow && c3_bottom >= ref_BodyLow);
 		bool topsValid = (c2_Close < ref_BodyHigh && c3_Open < ref_BodyHigh);
 
 		// Candle 3 body volledig binnen Candle 2 body (Inside Bar)
@@ -149,7 +165,7 @@ void OnTick()
 				double entryPrice = c3_Open;
 
 				// 2. Stop Loss: Het laagste punt (wick) van candle 4 (index 2 in deze context)
-				double buy_SL = c4_Low;
+				double buy_SL = c1_Close;
 
 				// 3. Take Profit: Risk-to-Reward Ratio = 1:2
 				// Afstand van de geplande entry tot de SL vermenigvuldigen met 2
