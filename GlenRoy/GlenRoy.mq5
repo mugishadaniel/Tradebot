@@ -165,16 +165,16 @@ bool DetectWPattern()
 	int lookbackCandles = 10;
 
 	// Variabelen om de eerste en tweede dieptepunten op te slaan
-	double firstLow = DBL_MAX;	// Initialiseer op een zeer hoge double waarde
-	double secondLow = DBL_MAX; // Initialiseer op een zeer hoge double waarde
+	double firstLow = DBL_MAX;	// Initialiseer op een zeer hoge double waarde (eerste dieptepunt)
+	double secondLow = DBL_MAX; // Initialiseer op een zeer hoge double waarde (tweede dieptepunt)
 	datetime firstLowTime = 0;
 	datetime secondLowTime = 0;
 
 	// Loop door de candles en zoek naar de eerste en tweede dieptepunten
-	for (int i = 0; i < lookbackCandles; i++)
+	for (int i = 0; i < lookbackCandles; i++) 
 	{
 		double currentLow = iLow(_Symbol, PERIOD_M5, i);
-		if (currentLow < firstLow)
+		if (currentLow < firstLow) // Check of de huidige laagte lager is dan de eerste laagte
 		{
 			secondLow = firstLow;
 			secondLowTime = firstLowTime;
@@ -182,14 +182,14 @@ bool DetectWPattern()
 			firstLow = currentLow;
 			firstLowTime = iTime(_Symbol, PERIOD_M5, i);
 		}
-		else if (currentLow < secondLow && iTime(_Symbol, PERIOD_M5, i) > firstLowTime)
+		else if (currentLow < secondLow && iTime(_Symbol, PERIOD_M5, i) > firstLowTime) // Check of de huidige laagte lager is dan de tweede laagte
 		{
 			secondLow = currentLow;
 			secondLowTime = iTime(_Symbol, PERIOD_M5, i);
 		}
 	}
 
-	// Check of het tweede dieptepunt hoger is dan het eerste dieptepunt
+	// Check of het tweede dieptepunt hoger is dan het eerste dieptepunt en of het tweede dieptepunt later in de tijd is dan het eerste dieptepunt
 	if (firstLow < secondLow && firstLowTime < secondLowTime)
 	{
 		return true;
@@ -205,15 +205,15 @@ bool DetectMPattern()
 	int lookbackCandles = 10;
 
 	// Variabelen om de eerste en tweede hoogtepunten op te slaan
-	double firstHigh = -DBL_MAX;  // Initialiseer op een zeer hoge double waarde
-	double secondHigh = -DBL_MAX; // Initialiseer op een zeer hoge double waarde
+	double firstHigh = -DBL_MAX;  // Initialiseer op een zeer hoge double waarde (eerste hoogtepunt)
+	double secondHigh = -DBL_MAX; // Initialiseer op een zeer hoge double waarde (tweede hoogtepunt)
 	datetime firstHighTime = 0;
 	datetime secondHighTime = 0;
 
-	for (int i = 0; i < lookbackCandles; i++)
+	for (int i = 0; i < lookbackCandles; i++) // Loop door de candles en zoek naar de eerste en tweede hoogtepunten
 	{
 		double currentHigh = iHigh(_Symbol, PERIOD_M5, i);
-		if (currentHigh > firstHigh)
+		if (currentHigh > firstHigh) // Check of de huidige hoogte hoger is dan de eerste hoogte
 		{
 			secondHigh = firstHigh;
 			secondHighTime = firstHighTime;
@@ -221,14 +221,14 @@ bool DetectMPattern()
 			firstHigh = currentHigh;
 			firstHighTime = iTime(_Symbol, PERIOD_M5, i);
 		}
-		else if (currentHigh > secondHigh && iTime(_Symbol, PERIOD_M5, i) > firstHighTime)
+		else if (currentHigh > secondHigh && iTime(_Symbol, PERIOD_M5, i) > firstHighTime) // Check of de huidige hoogte hoger is dan de tweede hoogte
 		{
 			secondHigh = currentHigh;
 			secondHighTime = iTime(_Symbol, PERIOD_M5, i);
 		}
 	}
 
-	// Check of de tweede hoogte hoger is dan de eerste hoogte
+	// Check of de tweede hoogte hoger is dan de eerste hoogte en of de tweede hoogte later in de tijd is dan de eerste hoogte
 	if (firstHigh > secondHigh && firstHighTime < secondHighTime)
 	{
 		return true;
@@ -333,7 +333,7 @@ void OnTick()
 		isMPattern = DetectMPattern();
 	}
 
-	// Zet Take Profit en Stop Loss voor een opwaartse trend
+	// Zet Take Profit en Stop Loss voor een opwaartse trend 
 	if (isUptrend && isWPattern)
 	{
 		takeProfit = M5_highestHigh;
@@ -369,7 +369,7 @@ void OnTick()
 		stopLoss = M5_highestHigh;
 		Print("Sell(Short) Trade!//////////////////////////////////////////////////////////////////////////////////////");
 
-		// Calculate the optimal lot size
+		// Calculate the optimal lot size (hoeveelheid van de order)
 		double lotSize = OptimalLotSize(_Symbol, currentPrice, stopLoss);
 
 		// MQL5 trade request structure
