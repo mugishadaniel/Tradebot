@@ -58,27 +58,35 @@ void OnTick()
 	if (HasOpenPositions())
 		return;
 
-	// 2. Als er GEEN trade loopt, maar wel een openstaande PENDING order:
+	// 2. Als er GEEN trade loopt, maar wel een openstaande PENDING order van DEZE bot:
 	if (OrdersTotal() > 0)
 	{
-		// Als de tijd is versprongen, is candle 4 gesloten zonder de order te triggeren!
+		// Als de tijd is versprongen, is de kaars gesloten zonder de order te triggeren!
 		if (currentTime != lastMessageTime)
 		{
-			Print(">>> [CANCEL] Candle 4 is voorbij en order is niet geraakt. Annuleren...");
+			Print(">>> [CANCEL] Kaars is voorbij en order is niet geraakt. Annuleren...");
 
-			// Loop door de orders om de pending order van deze bot te vinden en te verwijderen
 			for (int i = OrdersTotal() - 1; i >= 0; i--)
 			{
-				ulong ticket = OrderGetTicket(i);
-				if (OrderGetString(ORDER_SYMBOL) == _Symbol)
+				if (OrderGetTicket(i) > 0)
 				{
-					trade.OrderDelete(ticket);
+					if (OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == EA_MagicNumber)
+					{
+						trade.OrderDelete(OrderGetTicket(i));
+					}
 				}
 			}
 
-			lastMessageTime = currentTime; // Reset de tijd zodat de bot weer clean is
+			// BELANGRIJK: We zetten lastMessageTime NIET gelijk aan currentTime bij een cancel,
+			// zodat de bot DIRECT op deze tick al mag scannen naar een nieuw patroon!
+			lastMessageTime = 0;
 		}
-		return; // Stop hier, we gaan geen nieuwe orders plaatsen zolang de oude er nog staat
+
+		// De return moet ALLEEN gelden als de order op deze specifieke tick nog LIVE moet blijven wachten!
+		if (OrdersTotal() > 0)
+		{
+			return;
+		}
 	}
 
 	// Haal de data op van de laatste 4 gesloten candles
@@ -143,14 +151,14 @@ void OnTick()
 
 		double c2_bottom = c2_Open;
 		double c3_bottom = c3_Close;
-		double c4_bottom = c4_Open;
 
-		// Vorige box-eisen
-		bool bottomsValid = (c2_bottom >= ref_BodyLow && c3_bottom >= ref_BodyLow);
-		bool topsValid = (c2_Close < ref_BodyHigh && c3_Open < ref_BodyHigh);
+		// VOEG DEZE REGEL TOE: Marge van 0.3 pips (3 punten)
+		double epsilon = 0 * _Point;
 
-		// Candle 3 body volledig binnen Candle 2 body (Inside Bar)
-		bool c3_inside_c2 = (c3_Open < c2_Close) && (c3_Close > c2_Open);
+		// PAS DEZE DRIE REGELS AAN (epsilon toegevoegd):
+		bool bottomsValid = (c2_bottom >= (ref_BodyLow - epsilon) && c3_bottom >= (ref_BodyLow - epsilon));
+		bool topsValid = (c2_Close <= (ref_BodyHigh + epsilon) && c3_Open <= (ref_BodyHigh + epsilon));
+		bool c3_inside_c2 = (c3_Open <= (c2_Close + epsilon)) && (c3_Close >= (c2_Open - epsilon));
 
 		// NIEUWE EIS: C4 close moet HOGER zijn dan C2 close (top) en C3 open (top)
 		// bool c4_breakout = (c4_Close > c2_Close) && (c4_Close > c3_Open);
@@ -159,21 +167,23 @@ void OnTick()
 		{
 			if (lastMessageTime != currentTime)
 			{
-				Print(">>> [4-CANDLE] Candle 3 gesloten! Plaatsen Buy Stop op c3_Open.");
+				Print(">>> [4-CANDLE] Candle 3 gesloten! Plaatsen Buy Limit op c1_Close.");
 
-				// 1. Entry Prijs: De openingsprijs van de zojuist gesloten candle 3
-				double entryPrice = c3_Open;
+				// 1. Entry Prijs: De sluitingsprijs van candle 1 (onderkant van de box)
+				double entryPrice = c1_Close;
+				double c1_Low = iLow(_Symbol, _Period, 3);
+				double c2_Low = iLow(_Symbol, _Period, 2);
+				double c3_Low = iLow(_Symbol, _Period, 1);
+				// 2. Stop Loss: Hardcoded op 3 pips (30 punten) onder de entry prijs
 
-				// 2. Stop Loss: Het laagste punt (wick) van candle 4 (index 2 in deze context)
-				double buy_SL = c1_Close;
-
+				double buy_SL = MathMin(c1_Low, MathMin(c2_Low, c3_Low));
 				// 3. Take Profit: Risk-to-Reward Ratio = 1:2
-				// Afstand van de geplande entry tot de SL vermenigvuldigen met 2
+				// De sl_Distance is nu exact gelijk aan die 3 pips risico
 				double sl_Distance = entryPrice - buy_SL;
-				double buy_TP = entryPrice + (sl_Distance * 2.0); // 2x het risico
+				double buy_TP = entryPrice + (sl_Distance * 3.0); // 2x het risico (dus 6 pips winst)
 
-				// 4. Plaats de Pending Buy Stop order direct bij het sluiten van candle 3
-				trade.BuyStop(LotSize, entryPrice, _Symbol, buy_SL, buy_TP, ORDER_TIME_GTC, 0, "Pure4C BuyStop");
+				// 4. Plaats de Pending Buy Limit order direct bij het sluiten van candle 3
+				trade.BuyLimit(LotSize, entryPrice, _Symbol, buy_SL, buy_TP, ORDER_TIME_GTC, 0, "Pure4C BuyLimit");
 
 				lastMessageTime = currentTime;
 			}
