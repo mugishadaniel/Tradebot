@@ -15,6 +15,10 @@ input double LotSize = 0.10;			 // Grootte van de trade
 
 datetime lastMessageTime = 0; // Voorkomt dubbele entries op dezelfde candle
 
+bool m30_SignalActive = false;		 // Schakelt de M1-zoekmodus in of uit
+datetime m30_SignalTime = 0;			 // Onthoudt wanneer de M30 kaars sloot
+static double m30_ProtectedSL = 0.0; // Slaat de harde M30-bodem op
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -50,142 +54,109 @@ bool HasOpenPositions()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-	// Controleer alleen bij een nieuwe tick/candle en stop als er al een trade loopt
 	datetime currentTime = iTime(_Symbol, _Period, 0);
-	// Controleer of er al een positie openstaat van deze bot
-	// Blokkeer de bot als er al een actieve trade loopt óf als er een pending order klaarstaat
-	// 1. Als er een actieve positie (trade) loopt, doen we niks
+
+	// 1. Als er al een actieve positie (trade) loopt van deze bot, doen we niks
 	if (HasOpenPositions())
 		return;
 
-	// 2. Als er GEEN trade loopt, maar wel een openstaande PENDING order van DEZE bot:
-	if (OrdersTotal() > 0)
+	// 2. TIMEOUT CHECK: Als de M30-zoekmodus al langer dan 30 minuten (1800 seconden) openstaat
+	// zonder dat er op M1 een engulfing is geweest, resetten we de modus.
+	if (m30_SignalActive && (TimeCurrent() - m30_SignalTime > 1800))
 	{
-		// Als de tijd is versprongen, is de kaars gesloten zonder de order te triggeren!
-		if (currentTime != lastMessageTime)
-		{
-			Print(">>> [CANCEL] Kaars is voorbij en order is niet geraakt. Annuleren...");
-
-			for (int i = OrdersTotal() - 1; i >= 0; i--)
-			{
-				if (OrderGetTicket(i) > 0)
-				{
-					if (OrderGetString(ORDER_SYMBOL) == _Symbol && OrderGetInteger(ORDER_MAGIC) == EA_MagicNumber)
-					{
-						trade.OrderDelete(OrderGetTicket(i));
-					}
-				}
-			}
-
-			// BELANGRIJK: We zetten lastMessageTime NIET gelijk aan currentTime bij een cancel,
-			// zodat de bot DIRECT op deze tick al mag scannen naar een nieuw patroon!
-			lastMessageTime = 0;
-		}
-
-		// De return moet ALLEEN gelden als de order op deze specifieke tick nog LIVE moet blijven wachten!
-		if (OrdersTotal() > 0)
-		{
-			return;
-		}
+		Print(">>> [TIMEOUT] Geen M1 entry gevonden binnen 30 minuten na M30 setup. Resetmodus...");
+		m30_SignalActive = false;
 	}
 
-	// Haal de data op van de laatste 4 gesloten candles
-	double c1_Open = iOpen(_Symbol, _Period, 3);
-	double c1_Close = iClose(_Symbol, _Period, 3);
+	// ------------------------------------------------------------------
+	// DEEL A: SCANNEN VAN DE M30 STRUCTUUR
+	// ------------------------------------------------------------------
+	// We halen de data specifiek op van PERIOD_M30
+	double c1_Open = iOpen(_Symbol, PERIOD_M30, 3);
+	double c1_Close = iClose(_Symbol, PERIOD_M30, 3);
+	double c2_Open = iOpen(_Symbol, PERIOD_M30, 2);
+	double c2_Close = iClose(_Symbol, PERIOD_M30, 2);
+	double c3_Open = iOpen(_Symbol, PERIOD_M30, 1);
+	double c3_Close = iClose(_Symbol, PERIOD_M30, 1);
 
-	double c2_Open = iOpen(_Symbol, _Period, 2);
-	double c2_Close = iClose(_Symbol, _Period, 2);
-
-	double c3_Open = iOpen(_Symbol, _Period, 1);
-	double c3_Close = iClose(_Symbol, _Period, 1);
-
-	double c4_Open = iOpen(_Symbol, _Period, 0);
-	double c4_Close = iClose(_Symbol, _Period, 0);
-	double c4_High = iHigh(_Symbol, _Period, 0);
-	double c4_Low = iLow(_Symbol, _Period, 0);
-
-	// // --- CHECK 1: PURE BEARISH SEQUENCE (SHORT / SELL) ---
-	// bool shortSequence = (c1_Close > c1_Open) && // C1: Groen
-	// 							(c2_Close < c2_Open) && // C2: Rood
-	// 							(c3_Close > c3_Open) && // C3: Groen
-	// 							(c4_Close < c4_Open);	// C4: Rood
-
-	// if (shortSequence)
-	// {
-	// 	// Referentieniveau is de BOVENKANT van de body van Candle 1 (de Close)
-	// 	double ref_BodyHigh = c1_Close;
-
-	// 	// Bepaal de bovenkant van de body voor C2, C3 en C4
-	// 	double c2_top = c2_Open;  // Rood, dus Open is bovenkant
-	// 	double c3_top = c3_Close; // Groen, dus Close is bovenkant
-	// 	double c4_top = c4_Open;  // Rood, dus Open is bovenkant
-
-	// 	// Eis: Geen enkele bovenkant van de body mag hoger zijn dan ref_BodyHigh
-	// 	if (c2_top <= ref_BodyHigh && c3_top <= ref_BodyHigh && c4_top <= ref_BodyHigh)
-	// 	{
-	// 		if (lastMessageTime != currentTime)
-	// 		{
-	// 			Print(">>> [4-CANDLE SHORT] Patroon correct binnen box! Open Sell.");
-
-	// 			double sl_Buffer = 10 * _Point;
-	// 			double sell_SL = c4_High + sl_Buffer;
-	// 			double sl_Distance = sell_SL - c4_Close;
-	// 			double sell_TP = c4_Close - (sl_Distance * 2);
-
-	// 			trade.Sell(LotSize, _Symbol, 0, sell_SL, sell_TP, "Pure4C Short");
-	// 			lastMessageTime = currentTime;
-	// 		}
-	// 	}
-	// }
-
-	// --- CHECK 2: PURE BULLISH SEQUENCE (LONG / BUY) ---
 	bool longSequence = (c1_Close < c1_Open) && // C1: Rood
 							  (c2_Close > c2_Open) && // C2: Groen
 							  (c3_Close < c3_Open);	  // C3: Rood
-															  //(c4_Close > c4_Open);	  // C4: Groen
 
 	if (longSequence)
 	{
-		double ref_BodyLow = c1_Close; // Onderkant paarse box
-		double ref_BodyHigh = c1_Open; // Bovenkant paarse box
-
+		double ref_BodyLow = c1_Close;
+		double ref_BodyHigh = c1_Open;
 		double c2_bottom = c2_Open;
 		double c3_bottom = c3_Close;
+		double epsilon = 5 * _Point; // Jouw sweet spot marge van 0.5 pips
 
-		// VOEG DEZE REGEL TOE: Marge van 0.3 pips (3 punten)
-		double epsilon = 0 * _Point;
-
-		// PAS DEZE DRIE REGELS AAN (epsilon toegevoegd):
 		bool bottomsValid = (c2_bottom >= (ref_BodyLow - epsilon) && c3_bottom >= (ref_BodyLow - epsilon));
 		bool topsValid = (c2_Close <= (ref_BodyHigh + epsilon) && c3_Open <= (ref_BodyHigh + epsilon));
 		bool c3_inside_c2 = (c3_Open <= (c2_Close + epsilon)) && (c3_Close >= (c2_Open - epsilon));
 
-		// NIEUWE EIS: C4 close moet HOGER zijn dan C2 close (top) en C3 open (top)
-		// bool c4_breakout = (c4_Close > c2_Close) && (c4_Close > c3_Open);
-
+		// Als de M30 kaars NET gesloten is en aan de eisen voldoet:
 		if (bottomsValid && topsValid && c3_inside_c2)
 		{
-			if (lastMessageTime != currentTime)
+			// Haal de sluitingstijd van de zojuist voltooide M30 kaars op
+			datetime m30_CandleTime = iTime(_Symbol, PERIOD_M30, 0);
+
+			if (lastMessageTime != m30_CandleTime)
 			{
-				Print(">>> [4-CANDLE] Candle 3 gesloten! Plaatsen Buy Limit op c1_Close.");
+				// Haal de absolute laagste wick op van de 3 M30-kaarsen uit de structuur
+				double c1_Low = iLow(_Symbol, PERIOD_M30, 3);
+				double c2_Low = iLow(_Symbol, PERIOD_M30, 2);
+				double c3_Low = iLow(_Symbol, PERIOD_M30, 1);
 
-				// 1. Entry Prijs: De sluitingsprijs van candle 1 (onderkant van de box)
-				double entryPrice = c1_Close;
-				double c1_Low = iLow(_Symbol, _Period, 3);
-				double c2_Low = iLow(_Symbol, _Period, 2);
-				double c3_Low = iLow(_Symbol, _Period, 1);
-				// 2. Stop Loss: Hardcoded op 3 pips (30 punten) onder de entry prijs
+				m30_ProtectedSL = MathMin(c1_Low, MathMin(c2_Low, c3_Low));
 
-				double buy_SL = MathMin(c1_Low, MathMin(c2_Low, c3_Low));
-				// 3. Take Profit: Risk-to-Reward Ratio = 1:2
-				// De sl_Distance is nu exact gelijk aan die 3 pips risico
+				Print(">>> [M30 SETUP] Perfect patroon herkend op M30! Schakelen naar M1 zoekmodus...");
+				m30_SignalActive = true;
+				m30_SignalTime = TimeCurrent();
+				lastMessageTime = m30_CandleTime; // Zorgt dat dit maar 1x per M30 kaars triggert
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// DEEL B: SCANNEN VAN DE M1 ENTRY TRIGER (BULLISH ENGULFING)
+	// ------------------------------------------------------------------
+	// Dit deel wordt pas uitgevoerd zodra de M30-zoekmodus hierboven is geactiveerd
+	if (m30_SignalActive)
+	{
+		double m1_c1_Open = iOpen(_Symbol, PERIOD_M1, 1);
+		double m1_c1_Close = iClose(_Symbol, PERIOD_M1, 1);
+		double m1_c0_Open = iOpen(_Symbol, PERIOD_M1, 0);
+		double m1_c0_Close = iClose(_Symbol, PERIOD_M1, 0);
+
+		bool m1_c1_bearish = (m1_c1_Close < m1_c1_Open);
+		bool m1_c0_bullish = (m1_c0_Close > m1_c0_Open);
+
+		double m1_c1_bodySize = MathAbs(m1_c1_Open - m1_c1_Close);
+		double m1_c0_bodySize = MathAbs(m1_c0_Close - m1_c0_Open);
+
+		// We zetten de factor strak op 1.0: pure momentum ommekeer zonder te laat in te stappen
+		double engulfingFactor = 1.3;
+		bool m1_engulfing = (m1_c0_bodySize >= (m1_c1_bodySize * engulfingFactor));
+
+		if (m1_c1_bearish && m1_c0_bullish && m1_engulfing)
+		{
+			double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+			// 1. Stop Loss: De beschermde, ruime bodem van de M30 structuur
+			double buy_SL = m30_ProtectedSL;
+
+			// Controleer of de SL wiskundig wel onder onze entry ligt
+			if (entryPrice > buy_SL)
+			{
+				// 2. Take Profit: Risk-to-Reward Ratio = 1:2 op basis van de M30 structuur
 				double sl_Distance = entryPrice - buy_SL;
-				double buy_TP = entryPrice + (sl_Distance * 3.0); // 2x het risico (dus 6 pips winst)
+				double buy_TP = entryPrice + (sl_Distance * 2);
 
-				// 4. Plaats de Pending Buy Limit order direct bij het sluiten van candle 3
-				trade.BuyLimit(LotSize, entryPrice, _Symbol, buy_SL, buy_TP, ORDER_TIME_GTC, 0, "Pure4C BuyLimit");
+				Print(">>> [M1 EXECUTION] Bullish Engulfing bevestigd. Open Market Buy met M30 SL.");
+				trade.Buy(LotSize, _Symbol, entryPrice, buy_SL, buy_TP, "Pure4C M30-SL-Fix");
 
-				lastMessageTime = currentTime;
+				m30_SignalActive = false; // Reset de zoekmodus direct
 			}
 		}
 	}
